@@ -13,16 +13,14 @@ Window.OnRender = function (RenderTarget) {
 }
 
 
-//	queue of outputs to send
-const OutputPoses = [];
+let SendPose = null;
 
-function OnOutputPose(Pose)
+function OnNewPose(Pose)
 {
-	OutputPoses.push(Pose);
-	//	wake up output thread
+	if (!SendPose)
+		return;
+	SendPose(Pose);
 }
-
-
 
 //	create openvr overlay
 const IsOverlay = false;
@@ -36,10 +34,10 @@ Hmd.OnPoses = function (Poses)
 			return;
 		Pop.Debug(`Device ${Index} connected; valid=${Pose.IsValidPose}`);
 	}
+
+	OnNewPose(Poses);
 	//Poses.forEach(EnumPose);
 	//Pop.Debug("New JS Poses x" + Poses.length);
-
-	//	turn this into 
 }
 
 Hmd.OnRender = function(RenderTarget,Camera)
@@ -112,16 +110,37 @@ async function RunServer(OnMessage)
 		{
 			const Port = GetPortIndex();
 			const Socket = new Pop.Websocket.Server(Port);
+
+
 			Pop.Debug("Websocket listening on ",JSON.stringify(Socket.GetAddress()));
 
 			while (true)
 			{
 				const Message = await Socket.WaitForMessage();
 				OnMessage(Message,Socket);
+
+				if (!SendPose)
+				{
+					//	gr: this was causing an error, because I THINK we send a packet before handshake is finished?
+					//		temp fix, added to WaitForMessage
+					//	gr: maybe need peer's to finish connecting?
+					SendPose = function (Object)
+					{
+						const Peers = Socket.GetPeers();
+						const Message = JSON.stringify(Object);
+						function SendToPeer(Peer)
+						{
+							Pop.Debug("Send " + Message + " to " + Peer);
+							Socket.Send(Peer,Message);
+						}
+						Peers.forEach(SendToPeer);
+					}
+				}
 			}
 		}
 		catch (e)
 		{
+			SendPose = null;
 			Pop.Debug("Exception in server loop: " + e);
 			await Pop.Yield(2000);
 		}
@@ -129,5 +148,7 @@ async function RunServer(OnMessage)
 }
 
 
-RunBroadcast(OnBroadcastMessage).then(Pop.Debug).catch(Pop.Debug);
+//RunBroadcast(OnBroadcastMessage).then(Pop.Debug).catch(Pop.Debug);
 RunServer(OnRecievedMessage).then(Pop.Debug).catch(Pop.Debug);
+
+const Http = new Pop.Http.Server(8001);
