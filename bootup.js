@@ -8,19 +8,48 @@ Pop.Include('Expose.js');
 
 //	we need some render context for openvr
 const Window = new Pop.Opengl.Window("Render Context");
-Window.OnRender = function (RenderTarget) {
+Window.OnRender = function (RenderTarget) 
+{
 	RenderTarget.ClearColour(0, 1, 1);
 }
+Window.OnMouseMove = function () { };
 
 
 let SendPose = null;
+
+let PendingPoses = [];
 
 function OnNewPose(Pose)
 {
 	if (!SendPose)
 		return;
-	SendPose(Pose);
+
+	PendingPoses.push(Pose);
+	//SendPose(Pose);
 }
+
+//	throttled loop for now
+async function SendLoop()
+{
+	while (true)
+	{
+		Pop.Debug("Send pose");
+		if (!PendingPoses.length)
+		{
+			await Pop.Yield(700);
+			continue;
+		}
+
+		const Pose = PendingPoses[PendingPoses.length - 1];
+		PendingPoses = [];
+		SendPose(Pose);
+		
+		//await Pop.Yield(1);
+	}
+}
+SendLoop().then(Pop.Debug).catch(Pop.Debug);
+
+
 
 //	create openvr overlay
 const IsOverlay = false;
@@ -35,6 +64,34 @@ Hmd.OnPoses = function (Poses)
 		Pop.Debug(`Device ${Index} connected; valid=${Pose.IsValidPose}`);
 	}
 
+	function ValidDevice(Device)
+	{
+		return Device.IsConnected;
+	}
+	Poses = Poses.filter(ValidDevice);
+
+	function CleanDevice(Device)
+	{
+		//	any float32array's we need as arrays for delivery otherwise we
+		//	generate objects with keys 0,1,2,3 etc
+		const Keys = Object.keys(Device);
+		function ConvertTypedArrayToArray(Value)
+		{
+			if (Value instanceof Float32Array)
+			{
+				const FloatArray = Array.from(Value);
+				return FloatArray;
+			}
+			return Value;
+		}
+		function ConvertKey(Key)
+		{
+			Device[Key] = ConvertTypedArrayToArray(Device[Key]);
+		}
+		Keys.forEach(ConvertKey);
+	}
+	Poses.forEach(CleanDevice);
+	//Pop.Debug("Cleaned poses " + JSON.stringify(Poses));
 	OnNewPose(Poses);
 	//Poses.forEach(EnumPose);
 	//Pop.Debug("New JS Poses x" + Poses.length);
@@ -130,8 +187,15 @@ async function RunServer(OnMessage)
 						const Message = JSON.stringify(Object);
 						function SendToPeer(Peer)
 						{
-							Pop.Debug("Send " + Message + " to " + Peer);
-							Socket.Send(Peer,Message);
+							try
+							{
+								//Pop.Debug("Sending to " + Peer,Message);
+								Socket.Send(Peer,Message);
+							}
+							catch (e)
+							{
+								Pop.Debug("Error sending pose to " + Peer + "; " + e);
+							}
 						}
 						Peers.forEach(SendToPeer);
 					}
@@ -150,5 +214,3 @@ async function RunServer(OnMessage)
 
 //RunBroadcast(OnBroadcastMessage).then(Pop.Debug).catch(Pop.Debug);
 RunServer(OnRecievedMessage).then(Pop.Debug).catch(Pop.Debug);
-
-const Http = new Pop.Http.Server(8001);
