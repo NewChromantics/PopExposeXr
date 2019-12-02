@@ -22,12 +22,31 @@ function OnNewPose(Pose)
 	SendPose(Pose);
 }
 
-//	create openvr overlay
-const IsOverlay = false;
-const Hmd = new Pop.Openvr.Hmd("Device Name",Window);
-
-Hmd.OnPoses = function (Poses)
+function SetupFakePose()
 {
+	async function Loop()
+	{
+		while(true)
+		{
+			await Pop.Yield(1000);
+			const Pose = {};
+			Pose.Message = "I am a pose";
+			OnNewPose( Pose );
+		}
+	}
+	Loop().then(Pop.Debug).catch(Pop.Debug);
+}
+
+
+let Hmd;
+try
+{
+	//	create openvr overlay
+	const IsOverlay = false;
+	Hmd = new Pop.Openvr.Hmd("Device Name",Window);
+
+	Hmd.OnPoses = function (Poses)
+	{
 	function EnumPose(Pose, Index)
 	{
 		if (!Pose.IsConnected)
@@ -46,8 +65,14 @@ Hmd.OnRender = function(RenderTarget,Camera)
 		RenderTarget.ClearColour( 1,0,0 );
 	else if ( Camera.Name == "Right" )
 		RenderTarget.ClearColour( 0,1,0 );
-	else
-		RenderTarget.ClearColour( 0,0,1 );
+		else
+			RenderTarget.ClearColour( 0,0,1 );
+	}
+}
+catch(e)
+{
+	Pop.Debug("Failed to setup HMD " + e);
+	SetupFakePose();
 }
 
 
