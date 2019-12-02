@@ -11,27 +11,27 @@ const RenderCounter = new Pop.FrameCounter('Render');
 const PoseCounter = new Pop.FrameCounter('Poses');
 
 
+var Params = {};
+Params.SkipEmptyPoses = true;
+
 //	we need some render context for openvr
 const Window = new Pop.Opengl.Window("Render Context");
 Window.OnRender = function (RenderTarget) 
 {
-	RenderTarget.ClearColour(0, 1, 1);
+	RenderTarget.ClearColour(0,1,1);
+	RenderCounter.Add();
 }
 Window.OnMouseMove = function () { };
 
 //	send callback
 let SendPose = null;
 
-let PendingPoses = [];
-
 function OnNewPose(Pose)
 {
-	PoseCounter.Add();
 	if (!SendPose)
 		return;
 
-	PendingPoses.push(Pose);
-	//SendPose(Pose);
+	SendPose(Pose);
 }
 
 function SetupFakePose()
@@ -51,34 +51,14 @@ function SetupFakePose()
 
 
 
-//	throttled loop for now
-async function SendLoop()
-{
-	while (true)
-	{
-		Pop.Debug("Send pose");
-		if (!PendingPoses.length)
-		{
-			await Pop.Yield(700);
-			continue;
-		}
-
-		const Pose = PendingPoses[PendingPoses.length - 1];
-		PendingPoses = [];
-		SendPose(Pose);
-		
-		//await Pop.Yield(1);
-	}
-}
-SendLoop().then(Pop.Debug).catch(Pop.Debug);
-
-
-
 async function HmdPoseLoop()
 {
 	while ( Hmd )
 	{
+		//Pop.Debug("Waiting for poses");
 		const PoseStates = await Hmd.WaitForPoses();
+		//Pop.Debug("Got new poses" + JSON.stringify(PoseStates));
+		PoseCounter.Add();
 		
 		function DebugPose(Pose, Index)
 		{
@@ -92,8 +72,12 @@ async function HmdPoseLoop()
 		{
 			return Device.IsConnected;
 		}
-		PoseStates.Poses = PoseStates.Poses.filter(ValidDevice);
-	
+		PoseStates.Devices = PoseStates.Devices.filter(ValidDevice);
+
+		//	skip empty poses
+		if (Params.SkipEmptyPoses && PoseStates.Devices.length == 0)
+			continue;
+
 		function CleanDevice(Device)
 		{
 			//	any float32array's we need as arrays for delivery otherwise we
@@ -114,7 +98,7 @@ async function HmdPoseLoop()
 			}
 			Keys.forEach(ConvertKey);
 		}
-		PoseStates.Poses.forEach(CleanDevice);
+		PoseStates.Devices.forEach(CleanDevice);
 	
 		//Pop.Debug("Cleaned poses " + JSON.stringify(Poses));
 		OnNewPose(PoseStates);
@@ -143,8 +127,13 @@ try
 		
 		RenderCounter.Add();
 	}
-	
-	HmdPoseLoop();
+
+	function OnError(Error)
+	{
+		Pop.Debug("HmdPoseLoop finished:" + Error);
+	}
+
+	HmdPoseLoop().then(OnError).catch(OnError);
 }
 catch(e)
 {
@@ -219,9 +208,6 @@ async function RunServer(OnMessage)
 
 			while (true)
 			{
-				const Message = await Socket.WaitForMessage();
-				OnMessage(Message,Socket);
-
 				if (!SendPose)
 				{
 					//	gr: this was causing an error, because I THINK we send a packet before handshake is finished?
@@ -246,6 +232,9 @@ async function RunServer(OnMessage)
 						Peers.forEach(SendToPeer);
 					}
 				}
+
+				const Message = await Socket.WaitForMessage();
+				OnMessage(Message,Socket);
 			}
 		}
 		catch (e)
