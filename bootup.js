@@ -4,6 +4,11 @@ Pop.Include = function (Filename)
 	return Pop.CompileAndRun(Source,Filename);
 }
 Pop.Include('Expose.js');
+Pop.Include('PopFrameCounter.js');
+
+
+const RenderCounter = new Pop.FrameCounter('Render');
+const PoseCounter = new Pop.FrameCounter('Poses');
 
 
 //	we need some render context for openvr
@@ -14,13 +19,14 @@ Window.OnRender = function (RenderTarget)
 }
 Window.OnMouseMove = function () { };
 
-
+//	send callback
 let SendPose = null;
 
 let PendingPoses = [];
 
 function OnNewPose(Pose)
 {
+	PoseCounter.Add();
 	if (!SendPose)
 		return;
 
@@ -42,6 +48,9 @@ function SetupFakePose()
 	}
 	Loop().then(Pop.Debug).catch(Pop.Debug);
 }
+
+
+
 //	throttled loop for now
 async function SendLoop()
 {
@@ -65,75 +74,84 @@ SendLoop().then(Pop.Debug).catch(Pop.Debug);
 
 
 
+async function HmdPoseLoop()
+{
+	while ( Hmd )
+	{
+		const PoseStates = await Hmd.WaitForPoses();
+		
+		function DebugPose(Pose, Index)
+		{
+			if (!Pose.IsConnected)
+				return;
+			Pop.Debug(`Device ${Index} connected; valid=${Pose.IsValidPose}`);
+		}
+		//Poses.forEach(DebugPose);
+	
+		function ValidDevice(Device)
+		{
+			return Device.IsConnected;
+		}
+		PoseStates.Poses = PoseStates.Poses.filter(ValidDevice);
+	
+		function CleanDevice(Device)
+		{
+			//	any float32array's we need as arrays for delivery otherwise we
+			//	generate objects with keys 0,1,2,3 etc
+			const Keys = Object.keys(Device);
+			function ConvertTypedArrayToArray(Value)
+			{
+				if (Value instanceof Float32Array)
+				{
+					const FloatArray = Array.from(Value);
+					return FloatArray;
+				}
+				return Value;
+			}
+			function ConvertKey(Key)
+			{
+				Device[Key] = ConvertTypedArrayToArray(Device[Key]);
+			}
+			Keys.forEach(ConvertKey);
+		}
+		PoseStates.Poses.forEach(CleanDevice);
+	
+		//Pop.Debug("Cleaned poses " + JSON.stringify(Poses));
+		OnNewPose(PoseStates);
+		//Pop.Debug("New JS Poses x" + Poses.length);
+	}
+}
+
+
+
 //	create openvr overlay
 const IsOverlay = false;
-const Hmd = new Pop.Openvr.Hmd("Device Name",Window);
-
-
 let Hmd;
 try
 {
 	//	create openvr overlay
 	const IsOverlay = false;
 	Hmd = new Pop.Openvr.Hmd("Device Name",Window);
-
-	Hmd.OnPoses = function (Poses)
+	Hmd.OnRender = function(RenderTarget,Camera)
 	{
-	function EnumPose(Pose, Index)
-	{
-		if (!Pose.IsConnected)
-			return;
-		Pop.Debug(`Device ${Index} connected; valid=${Pose.IsValidPose}`);
-	}
-
-	function ValidDevice(Device)
-	{
-		return Device.IsConnected;
-	}
-	Poses = Poses.filter(ValidDevice);
-
-	function CleanDevice(Device)
-	{
-		//	any float32array's we need as arrays for delivery otherwise we
-		//	generate objects with keys 0,1,2,3 etc
-		const Keys = Object.keys(Device);
-		function ConvertTypedArrayToArray(Value)
-		{
-			if (Value instanceof Float32Array)
-			{
-				const FloatArray = Array.from(Value);
-				return FloatArray;
-			}
-			return Value;
-		}
-		function ConvertKey(Key)
-		{
-			Device[Key] = ConvertTypedArrayToArray(Device[Key]);
-		}
-		Keys.forEach(ConvertKey);
-	}
-	Poses.forEach(CleanDevice);
-	//Pop.Debug("Cleaned poses " + JSON.stringify(Poses));
-	OnNewPose(Poses);
-	//Poses.forEach(EnumPose);
-	//Pop.Debug("New JS Poses x" + Poses.length);
-}
-
-Hmd.OnRender = function(RenderTarget,Camera)
-{
-	if ( Camera.Name == "Left" )
-		RenderTarget.ClearColour( 1,0,0 );
-	else if ( Camera.Name == "Right" )
-		RenderTarget.ClearColour( 0,1,0 );
+		if ( Camera.Name == "Left" )
+			RenderTarget.ClearColour( 1,0,0 );
+		else if ( Camera.Name == "Right" )
+			RenderTarget.ClearColour( 0,1,0 );
 		else
 			RenderTarget.ClearColour( 0,0,1 );
+		
+		RenderCounter.Add();
 	}
+	
+	HmdPoseLoop();
 }
 catch(e)
 {
 	Pop.Debug("Failed to setup HMD " + e);
 	SetupFakePose();
 }
+
 
 
 
