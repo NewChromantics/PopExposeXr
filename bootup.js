@@ -13,6 +13,7 @@ const PoseCounter = new Pop.FrameCounter('Poses');
 
 var Params = {};
 Params.SkipEmptyPoses = true;
+Params.PoseFrameRateMax = 60;
 
 //	we need some render context for openvr
 const Window = new Pop.Opengl.Window("Render Context");
@@ -55,6 +56,9 @@ async function HmdPoseLoop()
 {
 	while ( Hmd )
 	{
+		//	throttle the thread by making it wait, which makes it discard old poses
+		await Pop.Yield( Math.floor(1000/Params.PoseFrameRateMax) );
+
 		//Pop.Debug("Waiting for poses");
 		const PoseStates = await Hmd.WaitForPoses();
 		//Pop.Debug("Got new poses" + JSON.stringify(PoseStates));
