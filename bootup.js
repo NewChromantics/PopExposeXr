@@ -10,6 +10,7 @@ Pop.Include('PopFrameCounter.js');
 const RenderCounter = new Pop.FrameCounter('Render');
 const PoseCounter = new Pop.FrameCounter('Poses');
 
+var DebugCounter = 0;
 
 var Params = {};
 Params.SkipEmptyPoses = true;
@@ -27,10 +28,13 @@ HmdRight.WritePixels(ImageWidth,ImageHeight,InitPixels,'RGBA');
 
 function RenderHmdEye(RenderTarget,Name,Camera)
 {
+	DebugCounter++;
+	let Blue = (DebugCounter % 60) / 60;
+
 	if (Name == "Left")
-		RenderTarget.ClearColour(1,0,0);
+		RenderTarget.ClearColour(1,0,Blue);
 	else
-		RenderTarget.ClearColour(0,1,0);
+		RenderTarget.ClearColour(0,1,Blue);
 }
 
 function RenderHmdEyes(RenderTarget)
@@ -73,8 +77,33 @@ Window.OnMouseMove = function () { };
 //	send callback
 let SendPose = null;
 
+
+function MoveOverlay(Poses)
+{
+	if (!Overlay)
+		return;
+
+	function IsControllerPose(Pose)
+	{
+		return Pose.Class == "TrackedDeviceClass_Controller";
+	}
+	const Controllers = Poses.Devices.filter(IsControllerPose);
+	if (!Controllers.length)
+		return;
+	
+	let Transform = Controllers[0].LocalToWorld;
+
+	//	temp as I havent written array stuff in chakra
+	Transform = new Float32Array(Transform);
+	Overlay.SetTransform(Transform);
+}
+
+
+
 function OnNewPose(Pose)
 {
+	MoveOverlay(Pose);
+
 	if (!SendPose)
 		return;
 
@@ -100,14 +129,15 @@ function SetupFakePose()
 
 async function HmdPoseLoop()
 {
-	while ( Hmd )
+	while ( Hmd || Overlay )
 	{
 		//	throttle the thread by making it wait, which makes it discard old poses
 		//	gr: currently the socket isn't sending fast enough (soy code)
 		await Pop.Yield( Math.floor(1000/Params.PoseFrameRateMax) );
 
+		let Openvr = Hmd || Overlay;
 		//Pop.Debug("Waiting for poses");
-		const PoseStates = await Hmd.WaitForPoses();
+		const PoseStates = await Openvr.WaitForPoses();
 		//Pop.Debug("Got new poses" + JSON.stringify(PoseStates));
 		PoseCounter.Add();
 		
@@ -188,6 +218,13 @@ if (!IsOverlay)
 else
 {
 	Overlay = new Pop.Openvr.Overlay("Expose");
+
+	function OnError(Error)
+	{
+		Pop.Debug("HmdPoseLoop finished:" + Error);
+	}
+
+	HmdPoseLoop().then(OnError).catch(OnError);
 }
 
 
