@@ -13,7 +13,41 @@ const PoseCounter = new Pop.FrameCounter('Poses');
 
 var Params = {};
 Params.SkipEmptyPoses = true;
-Params.PoseFrameRateMax = 60;
+Params.PoseFrameRateMax = 90;
+
+//	gr: these params are now different on web to desktop, fix this!
+const ImageWidth = 1024;
+const ImageHeight = 1024;
+const HmdLeft = new Pop.Image();
+const HmdRight = new Pop.Image();
+
+const InitPixels = new Uint8Array(ImageWidth * ImageHeight * 4);
+HmdLeft.WritePixels(ImageWidth,ImageHeight,InitPixels,'RGBA');
+HmdRight.WritePixels(ImageWidth,ImageHeight,InitPixels,'RGBA');
+
+function RenderHmdEye(RenderTarget,Name,Camera)
+{
+	if (Name == "Left")
+		RenderTarget.ClearColour(1,0,0);
+	else
+		RenderTarget.ClearColour(0,1,0);
+}
+
+function RenderHmdEyes(RenderTarget)
+{
+	//	todo: look at last poses for eye positions
+	//	todo: return true/false to skip submitting frames
+	function RenderLeft(RenderTarget)
+	{
+		RenderHmdEye(RenderTarget,"Left",null);
+	}
+	function RenderRight(RenderTarget)
+	{
+		RenderHmdEye(RenderTarget,"Right",null);
+	}
+	RenderTarget.RenderToRenderTarget(HmdLeft,RenderLeft);
+	RenderTarget.RenderToRenderTarget(HmdRight,RenderRight);
+}
 
 //	we need some render context for openvr
 const Window = new Pop.Opengl.Window("Render Context");
@@ -21,6 +55,13 @@ Window.OnRender = function (RenderTarget)
 {
 	RenderTarget.ClearColour(0,1,1);
 	RenderCounter.Add();
+
+	//	update hmd textures
+	if (Hmd)
+	{
+		RenderHmdEyes(RenderTarget);
+		Hmd.SubmitFrame(HmdLeft,HmdRight);
+	}
 }
 Window.OnMouseMove = function () { };
 
@@ -57,6 +98,7 @@ async function HmdPoseLoop()
 	while ( Hmd )
 	{
 		//	throttle the thread by making it wait, which makes it discard old poses
+		//	gr: currently the socket isn't sending fast enough (soy code)
 		await Pop.Yield( Math.floor(1000/Params.PoseFrameRateMax) );
 
 		//Pop.Debug("Waiting for poses");
@@ -113,25 +155,14 @@ async function HmdPoseLoop()
 
 
 //	create openvr overlay
+//	gr: overlay isnt allowed poses??
 const IsOverlay = false;
 let Hmd;
 try
 {
 	//	create openvr overlay
-	const IsOverlay = false;
-	Hmd = new Pop.Openvr.Hmd("Device Name",Window);
-	Hmd.OnRender = function(RenderTarget,Camera)
-	{
-		if ( Camera.Name == "Left" )
-			RenderTarget.ClearColour( 1,0,0 );
-		else if ( Camera.Name == "Right" )
-			RenderTarget.ClearColour( 0,1,0 );
-		else
-			RenderTarget.ClearColour( 0,0,1 );
-		
-		RenderCounter.Add();
-	}
-
+	Hmd = new Pop.Openvr.Hmd("Device Name",IsOverlay);
+	
 	function OnError(Error)
 	{
 		Pop.Debug("HmdPoseLoop finished:" + Error);
