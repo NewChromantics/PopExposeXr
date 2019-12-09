@@ -62,6 +62,11 @@ Window.OnRender = function (RenderTarget)
 		RenderHmdEyes(RenderTarget);
 		Hmd.SubmitFrame(HmdLeft,HmdRight);
 	}
+	if (Overlay)
+	{
+		RenderHmdEyes(RenderTarget);
+		Overlay.SubmitFrame(HmdLeft);
+	}
 }
 Window.OnMouseMove = function () { };
 
@@ -156,26 +161,34 @@ async function HmdPoseLoop()
 
 //	create openvr overlay
 //	gr: overlay isnt allowed poses??
-const IsOverlay = false;
+const IsOverlay = true;
 let Hmd;
-try
+let Overlay;
+
+if (!IsOverlay)
 {
-	//	create openvr overlay
-	Hmd = new Pop.Openvr.Hmd("Device Name",IsOverlay);
-	
-	function OnError(Error)
+	try
 	{
-		Pop.Debug("HmdPoseLoop finished:" + Error);
+		//	create openvr overlay
+		Hmd = new Pop.Openvr.Hmd("Device Name");
+
+		function OnError(Error)
+		{
+			Pop.Debug("HmdPoseLoop finished:" + Error);
+		}
+
+		HmdPoseLoop().then(OnError).catch(OnError);
 	}
-
-	HmdPoseLoop().then(OnError).catch(OnError);
+	catch (e)
+	{
+		Pop.Debug("Failed to setup HMD " + e);
+		SetupFakePose();
+	}
 }
-catch(e)
+else
 {
-	Pop.Debug("Failed to setup HMD " + e);
-	SetupFakePose();
+	Overlay = new Pop.Openvr.Overlay("Expose");
 }
-
 
 
 
