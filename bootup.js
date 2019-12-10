@@ -3,18 +3,32 @@ Pop.Include = function (Filename)
 	const Source = Pop.LoadFileAsString(Filename);
 	return Pop.CompileAndRun(Source,Filename);
 }
+Pop.Include('PopEngineCommon/PopMath.js');
+Pop.Include('PopEngineCommon/PopCamera.js');
+Pop.Include('PopEngineCommon/PopShaderCache.js');
+Pop.Include('PopEngineCommon/ParamsWindow.js');
+
 Pop.Include('Expose.js');
-Pop.Include('PopFrameCounter.js');
+Pop.Include('AssetManager.js');
+Pop.Include('PopEngineCommon/PopFrameCounter.js');
+Pop.Include('PopEngineCommon/PopAruco.js');
 
 
 const RenderCounter = new Pop.FrameCounter('Render');
 const PoseCounter = new Pop.FrameCounter('Poses');
+
+const BlitQuadShader = RegisterShaderAssetFilename('Blit.frag.glsl','Quad.vert.glsl');
+
 
 var DebugCounter = 0;
 
 var Params = {};
 Params.SkipEmptyPoses = true;
 Params.PoseFrameRateMax = 90;
+
+const ArucoNumber = Math.floor(Math.random() * 100);
+const ArucoImage = Pop.Aruco.GetMarkerImage(4,4,ArucoNumber);
+
 
 //	gr: these params are now different on web to desktop, fix this!
 const ImageWidth = 1024;
@@ -59,6 +73,38 @@ Window.OnRender = function (RenderTarget)
 {
 	RenderTarget.ClearColour(0,1,1);
 	RenderCounter.Add();
+
+
+	//	draw marker on screen
+	//	in the center
+	{
+		const RenderTargetRect = RenderTarget.GetScreenRect();
+		let w = RenderTargetRect[2];
+		let h = RenderTargetRect[3];
+		if (w > h)
+		{
+			w = h / w;
+			h = 1;
+		}
+		else
+		{
+			h = w / h;
+			w = 1;
+		}
+		let Border = 0.2;
+		w -= Border * w;
+		h -= Border * h;
+		const Rect = [(1 - w) / 2,(1 - h) / 2,w,h];
+		
+		const Quad = GetAsset('Quad',RenderTarget);
+		const Shader = GetAsset(BlitQuadShader,RenderTarget);
+		function SetUniforms(Shader)
+		{
+			Shader.SetUniform('Texture',ArucoImage);
+			Shader.SetUniform('VertexRect',Rect);
+		}
+		RenderTarget.DrawGeometry(Quad,Shader,SetUniforms);
+	}
 
 	//	update hmd textures
 	if (Hmd)
