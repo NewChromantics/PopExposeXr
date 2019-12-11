@@ -17,6 +17,7 @@ Pop.Include('PopEngineCommon/PopAruco.js');
 const RenderCounter = new Pop.FrameCounter('Render');
 const PoseCounter = new Pop.FrameCounter('Poses');
 const FrameImageCounter = new Pop.FrameCounter('FrameImage');
+const PngKbCounter = new Pop.FrameCounter('Png kb');
 
 
 const BlitQuadShader = RegisterShaderAssetFilename('Blit.frag.glsl','Quad.vert.glsl');
@@ -28,6 +29,15 @@ var Params = {};
 Params.SkipEmptyPoses = true;
 Params.PoseFrameRateMax = 60;
 Params.MirrorFrameRateMax = 30;
+Params.MirrorImageWidth = 256;
+Params.MirrorImageHeight = 256;
+
+var ParamsWindow = CreateParamsWindow(Params);
+ParamsWindow.AddParam('SkipEmptyPoses');
+ParamsWindow.AddParam('PoseFrameRateMax',1,90,Math.floor);
+ParamsWindow.AddParam('MirrorFrameRateMax',1,90,Math.floor);
+ParamsWindow.AddParam('MirrorImageWidth',2,1024,Math.floor);
+ParamsWindow.AddParam('MirrorImageHeight',2,1024,Math.floor);
 
 
 const ArucoNumber = Math.floor(Math.random() * 100);
@@ -144,7 +154,7 @@ Window.OnMouseMove = function () { };
 
 //	send callback
 let SendPose = null;
-
+let SendFramePng = null;
 
 function MoveOverlay(Poses)
 {
@@ -170,13 +180,14 @@ function MoveOverlay(Poses)
 
 function OnNewPose(Pose)
 {
-	MoveOverlay(Pose);
+	//MoveOverlay(Pose);
 
 	if (!SendPose)
 		return;
 
 	SendPose(Pose);
 }
+
 
 function SetupFakePose()
 {
@@ -196,6 +207,7 @@ function SetupFakePose()
 
 async function HmdCaptureLoop()
 {
+	const SmallImage = new Pop.Image();
 	while (Hmd || Overlay)
 	{
 		//	throttle the thread by making it wait, which makes it discard old poses
@@ -211,6 +223,16 @@ async function HmdCaptureLoop()
 
 		LastHmdFrameImage = FrameImage;
 
+		//if (!SendFramePng)			continue;
+
+		//	get png
+		//	todo: put pose into the exif
+		SmallImage.Copy(FrameImage);
+		SmallImage.Resize(Params.MirrorImageWidth,Params.MirrorImageHeight);
+		const PngData = SmallImage.GetPngData(0.5);
+		PngKbCounter.Add(PngData.length / 1024);
+		if (SendFramePng )
+			SendFramePng(PngData);
 		//	encode to h264, send out nalu packets
 	}
 }
@@ -403,6 +425,25 @@ async function RunServer(OnMessage)
 							catch (e)
 							{
 								Pop.Debug("Error sending pose to " + Peer + "; " + e);
+							}
+						}
+						Peers.forEach(SendToPeer);
+					}
+
+					SendFramePng = function (Object)
+					{
+						const Peers = Socket.GetPeers();
+						const Message = (Object);
+						function SendToPeer(Peer)
+						{
+							try
+							{
+								//Pop.Debug("Sending to " + Peer,Message);
+								Socket.Send(Peer,Message);
+							}
+							catch (e)
+							{
+								Pop.Debug("Error sending png to " + Peer + "; " + e);
 							}
 						}
 						Peers.forEach(SendToPeer);
