@@ -16,6 +16,8 @@ Pop.Include('PopEngineCommon/PopAruco.js');
 
 const RenderCounter = new Pop.FrameCounter('Render');
 const PoseCounter = new Pop.FrameCounter('Poses');
+const FrameImageCounter = new Pop.FrameCounter('FrameImage');
+
 
 const BlitQuadShader = RegisterShaderAssetFilename('Blit.frag.glsl','Quad.vert.glsl');
 
@@ -24,7 +26,9 @@ var DebugCounter = 0;
 
 var Params = {};
 Params.SkipEmptyPoses = true;
-Params.PoseFrameRateMax = 90;
+Params.PoseFrameRateMax = 60;
+Params.MirrorFrameRateMax = 30;
+
 
 const ArucoNumber = Math.floor(Math.random() * 100);
 const ArucoImage = Pop.Aruco.GetMarkerImage(4,4,ArucoNumber);
@@ -35,6 +39,8 @@ const ImageWidth = 1024;
 const ImageHeight = 1024;
 const HmdLeft = new Pop.Image();
 const HmdRight = new Pop.Image();
+
+let LastHmdFrameImage = null;
 
 const InitPixels = new Uint8Array(ImageWidth * ImageHeight * 4);
 HmdLeft.WritePixels(ImageWidth,ImageHeight,InitPixels,'RGBA');
@@ -67,12 +73,35 @@ function RenderHmdEyes(RenderTarget)
 	RenderTarget.RenderToRenderTarget(HmdRight,RenderRight);
 }
 
+
+
+function RenderTexture(RenderTarget,Texture,Rect)
+{
+	if (!Texture)
+		return;
+
+	const Quad = GetAsset('Quad',RenderTarget);
+	const Shader = GetAsset(BlitQuadShader,RenderTarget);
+	function SetUniforms(Shader)
+	{
+		Shader.SetUniform('Texture',Texture);
+		Shader.SetUniform('VertexRect',Rect);
+	}
+
+	RenderTarget.DrawGeometry(Quad,Shader,SetUniforms);
+}
+
+
+
 //	we need some render context for openvr
 const Window = new Pop.Opengl.Window("Render Context");
 Window.OnRender = function (RenderTarget) 
 {
 	RenderTarget.ClearColour(0,1,1);
 	RenderCounter.Add();
+
+	//LastHmdFrameImage = Overlay.GetMirrorTexture();
+	RenderTexture(RenderTarget,LastHmdFrameImage,[0,0,1,1]);
 
 
 	//	draw marker on screen
@@ -95,16 +124,9 @@ Window.OnRender = function (RenderTarget)
 		w -= Border * w;
 		h -= Border * h;
 		const Rect = [(1 - w) / 2,(1 - h) / 2,w,h];
-		
-		const Quad = GetAsset('Quad',RenderTarget);
-		const Shader = GetAsset(BlitQuadShader,RenderTarget);
-		function SetUniforms(Shader)
-		{
-			Shader.SetUniform('Texture',ArucoImage);
-			Shader.SetUniform('VertexRect',Rect);
-		}
-		RenderTarget.DrawGeometry(Quad,Shader,SetUniforms);
+		RenderTexture(RenderTarget,ArucoImage,Rect);
 	}
+
 
 	//	update hmd textures
 	if (Hmd)
@@ -171,6 +193,27 @@ function SetupFakePose()
 	Loop().then(Pop.Debug).catch(Pop.Debug);
 }
 
+
+async function HmdCaptureLoop()
+{
+	while (Hmd || Overlay)
+	{
+		//	throttle the thread by making it wait, which makes it discard old poses
+		//	gr: currently the socket isn't sending fast enough (soy code)
+		await Pop.Yield(Math.floor(1000 / Params.MirrorFrameRateMax));
+
+		let Openvr = Hmd || Overlay;
+		//Pop.Debug("Waiting for poses");
+		const RenderContext = Window;
+		const ReadPixels = true;
+		const FrameImage = await Openvr.WaitForMirrorImage(RenderContext, ReadPixels);
+		FrameImageCounter.Add();
+
+		LastHmdFrameImage = FrameImage;
+
+		//	encode to h264, send out nalu packets
+	}
+}
 
 
 async function HmdPoseLoop()
@@ -254,6 +297,7 @@ if (!IsOverlay)
 		}
 
 		HmdPoseLoop().then(OnError).catch(OnError);
+		HmdCaptureLoop().then(OnError).catch(OnError);
 	}
 	catch (e)
 	{
@@ -271,6 +315,7 @@ else
 	}
 
 	HmdPoseLoop().then(OnError).catch(OnError);
+	HmdCaptureLoop().then(OnError).catch(OnError);
 }
 
 
